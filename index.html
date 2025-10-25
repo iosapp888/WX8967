@@ -120,6 +120,8 @@
     <!-- 加载状态 -->
     <div id="loaderContainer" class="fixed inset-0 flex flex-col justify-center items-center bg-white z-50">
         <div class="loader mb-4"></div>
+        <h1 class="text-xl font-semibold text-gray-800"></h1>
+        <p id="loadProgress" class="text-gray-500 mt-2 text-sm"></p>
     </div>
     
     <!-- 内嵌模式容器 -->
@@ -132,6 +134,8 @@
     <!-- 链接过期页面 -->
     <div id="expiredContainer" class="hidden fixed inset-0 flex flex-col justify-center items-center expired-container z-50 p-6 text-center">
         <div class="expired-x mb-6">✕</div>
+        <h3 class="text-2xl font-bold text-gray-800 mb-3"></h3>
+        <p id="expiryDetail" class="text-gray-600 mb-8 max-w-md"></p>
         <button id="closeBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2 rounded-md transition-colors">
             关闭页面
         </button>
@@ -140,15 +144,22 @@
     <!-- 二维码过期页面 -->
     <div id="qrExpiredContainer" class="hidden fixed inset-0 flex flex-col justify-center items-center bg-white z-50 p-6 text-center">
         <div class="text-red-500 text-6xl mb-6">❌</div>
+        <h3 class="text-2xl font-bold text-gray-800 mb-3"></h3>
+        <p class="text-gray-600 mb-6 max-w-md"></p>
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 max-w-md">
+            <p class="text-sm text-yellow-700">
+                <i class="fa fa-info-circle mr-1"></i>
+            </p>
+        </div>
         <button id="closeQrBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2 rounded-md transition-colors">
             关闭页面
         </button>
     </div>
     
-    <!-- 引导模式页面（保留但不使用） -->
+    <!-- 引导模式页面 -->
     <div id="guideMask" class="guide-mask hidden">
         <header class="guide-title">
-            <h1 id="guideTitle" class="hidden">请在浏览器中打开</h1>
+            <h1 id="guideTitle">请在浏览器中打开</h1>
             <div class="supported-envs" id="guideSupportedEnvs"></div>
         </header>
         <div class="demo">
@@ -157,7 +168,7 @@
                     <div class="col-md-12">
                         <div class="loader-guide">
                             <div class="loading-1"></div>
-                            <div class="loading-2" id="guideHint" class="hidden">请点击右上角选择"在浏览器中打开"</div>
+                            <div class="loading-2" id="guideHint">请点击右上角选择"在浏览器中打开"</div>
                         </div>
                     </div>
                 </div>
@@ -168,6 +179,12 @@
     <!-- 错误信息页面 -->
     <div id="errorContainer" class="hidden fixed inset-0 flex flex-col justify-center items-center bg-white z-50 p-6 text-center">
         <i id="errorIcon" class="fa fa-exclamation-triangle text-yellow-500 text-5xl mb-4"></i>
+        <h3 class="text-xl font-semibold text-gray-700 mb-2"></h3>
+        <p id="errorMessage" class="text-gray-500 mb-6"></p>
+        <div class="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-lg">
+            <p class="text-sm text-blue-700 mb-3"><i class="fa fa-info-circle mr-1"></i></p>
+            <div class="supported-envs" id="errorSupportedEnvs"></div>
+        </div>
         <button id="retryBtn" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-md transition-colors">
             重试
         </button>
@@ -200,10 +217,23 @@ document.addEventListener('contextmenu', function(e) {
             title: '',
             subtitle: '', // 用于分享描述
             cover_image: '', // 用于分享图片
-            method: 'embed' // 默认内嵌模式
+            method: 'embed', // 默认内嵌模式（API未返回时使用）
+            services: [], // 支持的服务列表（含详情）
+            serviceKeys: [] // 服务标识（用于验证）
         };
         
-        // 1. 提取参数（支持token和id）
+        // 1. 环境检测
+        function detectCurrentEnv() {
+            const ua = navigator.userAgent.toLowerCase();
+            if (ua.includes('micromessenger')) return 'wechat'; // 微信环境
+            if (ua.includes('qq/') || ua.includes('qzone/')) return 'qq'; // QQ环境
+            if (ua.includes('alipayclient')) return 'alipay'; // 支付宝环境
+            if (ua.includes('douyin') || ua.includes('tiktok') || ua.includes('bytedance')) return 'douyin'; // 抖音环境
+            if (/(chrome|safari|firefox|edge|opera|brave)/i.test(navigator.userAgent)) return 'browser'; // 浏览器环境
+            return 'other'; // 其他环境
+        }
+        
+        // 2. 提取参数（支持token和id）
         function extractParamsFromUrl() {
             const params = new URLSearchParams(window.location.search);
             let token = params.get('token');
@@ -221,11 +251,13 @@ document.addEventListener('contextmenu', function(e) {
             };
         }
         
-        // 2. 验证token有效性
+        // 3. 验证token有效性
         async function validateToken(token) {
             if (!token) return { valid: false, reason: '缺少token参数' };
             
             try {
+                updateLoadProgress('');
+                
                 // 调用API验证token
                 const apiUrl = `https://wywfh.com/api.php?action=get_url&token=${encodeURIComponent(token)}`;
                 
@@ -269,7 +301,7 @@ document.addEventListener('contextmenu', function(e) {
             }
         }
         
-        // 3. 更新页面元数据
+        // 4. 更新页面元数据
         function updatePageMetadata(data) {
             const title = data.title || '内容加载中...';
             const desc = data.subtitle || '正在加载内容...';
@@ -288,7 +320,62 @@ document.addEventListener('contextmenu', function(e) {
             currentContent.subtitle = desc;
         }
         
-        // 5. 处理内嵌模式
+        // 5. 更新加载进度
+        function updateLoadProgress(message) {
+            document.getElementById('loadProgress').textContent = message;
+        }
+        
+        // 6. 渲染支持的环境标签
+        function renderEnvTags(containerId, services) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            // 环境标签样式映射
+            const envStyles = {
+                'wechat': 'bg-green-100 text-green-800',
+                'qq': 'bg-blue-100 text-blue-800',
+                'alipay': 'bg-blue-50 text-blue-600',
+                'douyin': 'bg-red-100 text-red-800',
+                'browser': 'bg-gray-100 text-gray-800'
+            };
+            // 环境图标映射
+            const envIcons = {
+                'wechat': 'fa-weixin',
+                'qq': 'fa-qq',
+                'alipay': 'fa-credit-card',
+                'douyin': 'fa-music',
+                'browser': 'fa-globe'
+            };
+            services.forEach(service => {
+                const tag = document.createElement('div');
+                tag.className = `env-tag ${envStyles[service.key] || 'bg-gray-100 text-gray-800'}`;
+                tag.innerHTML = `<i class="fa ${service.icon || envIcons[service.key] || 'fa-globe'} mr-1"></i>${service.name}`;
+                container.appendChild(tag);
+            });
+        }
+        
+        // 7. 验证当前环境是否在支持列表中（浏览器环境直接通过）
+        function isEnvSupported(currentEnv, serviceKeys) {
+            // 浏览器环境直接通过，不限制服务环境
+            if (currentEnv === 'browser') {
+                return true;
+            }
+            
+            // 支付宝服务直接通过
+            if (serviceKeys.includes('alipay')) {
+                return true;
+            }
+            
+            // 其他环境仍需正常验证
+            const envMap = {
+                'wechat': ['wechat'],
+                'qq': ['qq'],
+                'douyin': ['douyin'],
+                'browser': ['browser', 'other']
+            };
+            return serviceKeys.some(key => envMap[key]?.includes(currentEnv));
+        }
+        
+        // 8. 处理内嵌模式（API返回method=embed时执行）
         async function handleEmbedMode(url) {
             const contentFrame = document.getElementById('contentFrame');
             const loaderContainer = document.getElementById('loaderContainer');
@@ -315,24 +402,66 @@ document.addEventListener('contextmenu', function(e) {
                 };
                 
                 // 设置iframe源
+                updateLoadProgress('');
                 contentFrame.src = url;
             });
         }
         
-        // 6. 处理跳转模式
-        function handleRedirectMode(url) {
-            // 短暂延迟显示进度提示后跳转
+        // 9. 处理引导模式（浏览器环境直接跳转，不检查支持列表）
+        function handleRedirectMode(currentEnv, url) {
+            // 浏览器环境：直接跳转目标网址（不检查支持列表）
+            if (currentEnv === 'browser') {
+                updateLoadProgress('');
+                // 短暂延迟显示进度提示后跳转
+                setTimeout(() => {
+                    window.location.href = url;
+                }, 600);
+                return true;
+            }
+            
+            // 微信和QQ环境：显示引导遮罩
+            if (['wechat', 'qq'].includes(currentEnv)) {
+                const guideMask = document.getElementById('guideMask');
+                const loaderContainer = document.getElementById('loaderContainer');
+                const guideHint = document.getElementById('guideHint');
+                
+                // 根据环境定制引导文案
+                const envHints = {
+                    'wechat': '请点击右上角选择"在浏览器中打开"',
+                    'qq': '请点击右上角选择"用浏览器打开"'
+                };
+                
+                // 渲染支持的环境标签（突出显示浏览器）
+                renderEnvTags('guideSupportedEnvs', [
+                    { key: 'browser', name: '浏览器', icon: 'fa-globe' }
+                ]);
+                
+                // 更新引导文案
+                guideHint.textContent = envHints[currentEnv];
+                
+                // 显示引导页，隐藏加载状态
+                loaderContainer.classList.add('hidden');
+                guideMask.classList.remove('hidden');
+                return false;
+            }
+            
+            // 其他环境（非微信/QQ/浏览器）：默认跳转
+            updateLoadProgress('');
             setTimeout(() => {
                 window.location.href = url;
             }, 600);
             return true;
         }
         
-        // 7. 微信分享配置
+        // 10. 微信分享配置
         async function configureWechatShare() {
+            // 仅在微信环境中执行
+            if (detectCurrentEnv() !== 'wechat') return;
+            
             try {
-                // 获取当前页面URL（不含#及后面部分）
+                // 获取当前页面URL（不含#及后面部分，必须与签名一致）
                 const currentUrl = window.location.href.split('#')[0];
+                updateLoadProgress('');
                 
                 // 调用远程签名接口
                 const apiUrl = `https://kp.vxjuejin.com/wx_signature_api.php?url=${encodeURIComponent(currentUrl)}`;
@@ -399,30 +528,48 @@ document.addEventListener('contextmenu', function(e) {
                     // 非关键错误，不阻断页面加载
                 });
                 
+                updateLoadProgress('');
+                
             } catch (error) {
                 console.error('微信分享配置失败:', error);
-                // 分享配置失败不影响页面主功能
+                // 分享配置失败不影响页面主功能，仅在控制台提示
             }
         }
         
-        // 8. 主逻辑：直接处理内容，不做环境检测
-        async function processContent() {
+        // 11. 主逻辑：根据API返回的模式处理
+        async function processContent(currentEnv) {
             const { url, method } = currentContent;
             
-            // 尝试配置微信分享（不影响主流程）
-            try {
+            // 如果是微信环境，先配置分享再处理内容展示
+            if (currentEnv === 'wechat') {
                 await configureWechatShare();
-            } catch (e) {
-                console.log('微信分享配置跳过:', e);
             }
             
             if (method === 'redirect') {
-                // 跳转模式
-                return handleRedirectMode(url);
+                // 引导模式：直接执行跳转逻辑，跳过环境验证
+                return handleRedirectMode(currentEnv, url);
             } else {
-                // 内嵌模式
+                // 内嵌模式：保留环境验证
+                if (!isEnvSupported(currentEnv, currentContent.serviceKeys)) {
+                    renderEnvTags('errorSupportedEnvs', currentContent.services);
+                    throw new Error('environment_mismatch');
+                }
+                // 正常加载iframe
                 return handleEmbedMode(url);
             }
+        }
+        
+        // 辅助函数：环境标识转中文名称
+        function getEnvName(env) {
+            const names = {
+                'wechat': '微信', 
+                'qq': 'QQ', 
+                'alipay': '支付宝',
+                'douyin': '抖音', 
+                'browser': '浏览器', 
+                'other': '其他环境'
+            };
+            return names[env] || '未知环境';
         }
         
         // 页面初始化
@@ -444,19 +591,24 @@ document.addEventListener('contextmenu', function(e) {
                     window.close();
                 } else {
                     document.getElementById('qrExpiredContainer').classList.add('hidden');
+                // 返回到首页或显示提示
                     window.location.href = 'https://wywfh.com/';
                 }
             });
         });
         
-        // 9. 加载内容主函数
+        // 12. 加载内容主函数（支持token和id两种方式）
         async function loadContent() {
             // 初始化DOM元素
             const loader = document.getElementById('loaderContainer');
             const errorContainer = document.getElementById('errorContainer');
             const expiredContainer = document.getElementById('expiredContainer');
             const qrExpiredContainer = document.getElementById('qrExpiredContainer');
-            const errorIcon = document.getElementById('errorIcon');
+            const [errorIcon, errorMessage] = [
+                document.getElementById('errorIcon'),
+                document.getElementById('errorMessage')
+            ];
+            const expiryDetail = document.getElementById('expiryDetail');
             
             // 重置所有状态
             loader.classList.remove('hidden');
@@ -470,16 +622,22 @@ document.addEventListener('contextmenu', function(e) {
                 setTimeout(() => {
                     loader.classList.add('hidden');
                     errorIcon.className = 'fa fa-exclamation-triangle text-yellow-500 text-5xl mb-4';
+                    errorMessage.textContent = '';
                     errorContainer.classList.remove('hidden');
                 }, 500);
                 return;
             }
             
             try {
+                // 检测当前环境
+                const currentEnv = detectCurrentEnv();
+                updateLoadProgress(``);
+                
                 let result;
                 
                 // 如果有token，先验证token
                 if (token) {
+                    updateLoadProgress('');
                     const tokenValidation = await validateToken(token);
                     
                     if (!tokenValidation.valid) {
@@ -495,8 +653,10 @@ document.addEventListener('contextmenu', function(e) {
                     
                     // token验证成功，使用返回的数据
                     result = { success: true, data: tokenValidation.data };
+                    updateLoadProgress('');
                 } else {
                     // 使用传统的ID方式
+                    updateLoadProgress('');
                     const apiUrl = `https://wywfh.com/api.php?action=get_url&id=${id}`;
                     
                     // 设置请求超时（10秒）
@@ -511,6 +671,9 @@ document.addEventListener('contextmenu', function(e) {
                 if (!result.success) {
                     if (result.message === "该链接已过期") {
                         // 链接过期处理
+                        expiryDetail.textContent = result.data?.expiry_time 
+                            ? `` 
+                            : "";
                         loader.classList.add('hidden');
                         expiredContainer.classList.remove('hidden');
                         return;
@@ -530,21 +693,39 @@ document.addEventListener('contextmenu', function(e) {
                     title: result.data.title || '',
                     subtitle: result.data.subtitle || '',
                     cover_image: result.data.cover_image || '',
-                    method: result.data.method || 'embed'
+                    method: result.data.method || 'embed',
+                    services: result.data.services || [],
+                    serviceKeys: result.data.services?.map(s => s.key) || []
                 };
                 
                 // 更新页面元数据
                 updatePageMetadata(result.data);
                 
-                // 直接处理内容展示（不做环境检测）
-                await processContent();
+                // 处理内容展示（环境验证移至processContent函数，仅内嵌模式验证）
+                updateLoadProgress(``);
+                await processContent(currentEnv);
                 
             } catch (error) {
                 console.error('加载失败:', error);
                 loader.classList.add('hidden');
                 
+                // 处理环境不匹配错误（仅内嵌模式可能触发）
+                if (error.message === 'environment_mismatch') {
+                    errorIcon.className = 'fa fa-ban text-red-500 text-5xl mb-4';
+                    errorMessage.textContent = '';
+                    errorContainer.classList.remove('hidden');
+                    return;
+                }
+                
                 // 处理其他错误
+                const errorText = error.message.includes('超时') 
+                    ? '' 
+                    : error.message.includes('未找到') 
+                        ? `` 
+                        : ``;
+                
                 errorIcon.className = 'fa fa-exclamation-triangle text-yellow-500 text-5xl mb-4';
+                errorMessage.textContent = errorText;
                 errorContainer.classList.remove('hidden');
             }
         }
